@@ -9,7 +9,7 @@ from pydantic import BaseModel, Field, field_validator
 from pydantic_ai import Agent
 from duckduckgo_search import DDGS
 
-# Load environment variables
+# Load environment variables (.env file for local, Railway Variables for cloud)
 load_dotenv()
 
 # ==========================================
@@ -95,8 +95,6 @@ class WebScrapingIngestionEngine:
 # ==========================================
 # LAYERS 2 & 3: MULTI-AGENT PIPELINE (V2.0)
 # ==========================================
-# FIX: Removed the conflicting 'temperature' overrides. GPT-5.5 strictly defaults to 1.
-
 structurer_agent = Agent(
     model=MODEL,
     system_prompt="Normalize the raw scraped sports JSON into a unified, crisp Markdown block mapping rosters, injuries, and stadium conditions."
@@ -196,12 +194,15 @@ async def scan_and_process_slate(ctx=None, channel=None, target_date: str = None
             struct_output = await structurer_agent.run(str(game))
             
             print("   [2/3] Executing Omni-Factor Analyst (Triggering Web Tools)...")
-            analysis_output = await analyst_agent.run(struct_output.data)
+            # FIXED: Updated .data to .output for Pydantic-AI v2.0
+            analysis_output = await analyst_agent.run(struct_output.output) 
             
             print("   [3/3] Running strict Pydantic validation (8.5+ check)...")
-            validated_payload = await validator_agent.run(analysis_output.data)
+            # FIXED: Updated .data to .output
+            validated_payload = await validator_agent.run(analysis_output.output) 
             
-            play = validated_payload.data
+            # FIXED: Updated .data to .output
+            play = validated_payload.output 
             found_plays += 1
             print(f"   [✅ PLAY CLEARED] Confidence: {play.confidence_rating}/10.0")
             
@@ -228,7 +229,7 @@ async def scan_and_process_slate(ctx=None, channel=None, target_date: str = None
                 if analysis_output:
                     print(f"\n   [🧠 AI'S INTERNAL BREAKDOWN]:")
                     print(f"   {'-'*50}")
-                    print(f"   {analysis_output.data[:1000]}...")
+                    print(f"   {str(analysis_output.output)[:1000]}...")
                     print(f"   {'-'*50}\n")
             else:
                 print(f"   Reason: System/Logic Failure -> {error_msg}")
@@ -245,7 +246,6 @@ async def scan_and_process_slate(ctx=None, channel=None, target_date: str = None
 
 @bot.command(name="scan")
 async def manual_scan(ctx, target_date: str = None):
-    # Auto-correct MM-DD-YYYY to the strict YYYY-MM-DD standard for the API
     if target_date and len(target_date.split("-")[0]) == 2:
         try:
             parsed_date = datetime.strptime(target_date, "%m-%d-%Y")

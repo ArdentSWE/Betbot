@@ -2,5 +2,5 @@ pydantic>=2.0.0
 pydantic-ai
 httpx
 pandas
-schedule
+discord.py
 python-dotenv

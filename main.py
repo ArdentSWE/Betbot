@@ -9,7 +9,7 @@ from pydantic import BaseModel, Field, field_validator
 from pydantic_ai import Agent
 from duckduckgo_search import DDGS
 
-# Load environment variables (.env file for local, Railway Variables for cloud)
+# Load environment variables
 load_dotenv()
 
 # ==========================================
@@ -95,10 +95,11 @@ class WebScrapingIngestionEngine:
 # ==========================================
 # LAYERS 2 & 3: MULTI-AGENT PIPELINE (V2.0)
 # ==========================================
+# FIX: Removed the conflicting 'temperature' overrides. GPT-5.5 strictly defaults to 1.
+
 structurer_agent = Agent(
     model=MODEL,
-    system_prompt="Normalize the raw scraped sports JSON into a unified, crisp Markdown block mapping rosters, injuries, and stadium conditions.",
-    model_settings={'temperature': 0.1}
+    system_prompt="Normalize the raw scraped sports JSON into a unified, crisp Markdown block mapping rosters, injuries, and stadium conditions."
 )
 
 analyst_agent = Agent(
@@ -125,11 +126,9 @@ analyst_agent = Agent(
         "Narrative Scrubbing: Completely eliminate gut feelings and unverified momentum narratives.\n\n"
         "STAGE 7: FINAL VERDICT & CONSERVATIVE EXECUTION\n"
         "Assign a conservative confidence rating on a scale of 1.0 to 10.0. Only plays hitting 8.5+ pass."
-    ),
-    model_settings={'temperature': 0.1}
+    )
 )
 
-# This tool physically gives the AI the ability to scour the web for missing data
 @analyst_agent.tool_plain
 def scour_the_web(query: str) -> str:
     """Use this tool to search the internet for starting pitchers, live ERAs, and injury reports."""
@@ -144,8 +143,7 @@ def scour_the_web(query: str) -> str:
 validator_agent = Agent(
     model=MODEL,
     output_type=AlphaPlay, 
-    system_prompt="Cast the analytical breakdown into the JSON schema. Verify the confidence rating is strictly 8.5+. Strip narrative fluff.",
-    model_settings={'temperature': 0.1}
+    system_prompt="Cast the analytical breakdown into the JSON schema. Verify the confidence rating is strictly 8.5+. Strip narrative fluff."
 )
 
 

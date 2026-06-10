@@ -7,9 +7,14 @@ from datetime import datetime
 from dotenv import load_dotenv
 from pydantic import BaseModel, Field, field_validator
 from pydantic_ai import Agent
-from ddgs import DDGS  # FIXED: Updated to the new package architecture
 
-# Load environment variables
+# Failsafe Import Logic for Railway Caching
+try:
+    from ddgs import DDGS
+except ImportError:
+    from duckduckgo_search import DDGS
+
+# Load environment variables (.env file for local, Railway Variables for cloud)
 load_dotenv()
 
 # ==========================================
@@ -36,6 +41,7 @@ class AlphaPlay(BaseModel):
     sport_league: str = Field(description="The league name, e.g., 'MLB', 'NHL', 'NBA', 'UFC'")
     market_position: str = Field(description="The precise betting market, e.g., 'LAD F5 ML' or 'Player Prop'")
     current_odds: str = Field(description="Consensus odds")
+    target_buy_price: str = Field(description="The exact odds where this becomes a +EV mathematical buy (e.g., '-150' or 'Better than -130').")
     confidence_rating: float = Field(description="Strict scale from 1.0 to 10.0. Only 8.5+ allowed.")
     data_grounded_why: str = Field(description="Concise, bulleted justification.")
     devils_advocate_refutation: str = Field(description="The explicit breakdown of how the play survives the reverse-test.")   
@@ -122,8 +128,11 @@ analyst_agent = Agent(
         "STAGE 6: THE ANTI-HALLUCINATION PROTOCOL\n"
         "Strict Data Grounding: Mandate all data is pulled from verified databases.\n"
         "Narrative Scrubbing: Completely eliminate gut feelings and unverified momentum narratives.\n\n"
-        "STAGE 7: FINAL VERDICT & CONSERVATIVE EXECUTION\n"
-        "Assign a conservative confidence rating on a scale of 1.0 to 10.0. Only plays hitting 8.5+ pass."
+        "STAGE 7: FINAL VERDICT, TARGET PRICING & EXECUTION\n"
+        "1. Evaluate the current market odds against your calculated true probability.\n"
+        "2. If the current price is mathematically negative expected value (-EV) because the juice is too high, you MUST declare a PASS for the current execution.\n"
+        "3. However, you MUST calculate and provide the exact 'Target Buy Price' (e.g., -150) where the structural mismatch outweighs the implied probability.\n"
+        "4. Assign a conservative confidence rating on a scale of 1.0 to 10.0. Only plays hitting 8.5+ pass."
     )
 )
 
@@ -209,7 +218,8 @@ async def scan_and_process_slate(ctx=None, channel=None, target_date: str = None
             )
             play_embed.add_field(name="Matchup", value=f"**{play.game_identifier}**", inline=False)
             play_embed.add_field(name="Market Position", value=f"`{play.market_position}`", inline=True)
-            play_embed.add_field(name="Odds", value=play.current_odds, inline=True)
+            play_embed.add_field(name="Current Odds", value=play.current_odds, inline=True)
+            play_embed.add_field(name="Target Buy Price", value=f"🎯 **{play.target_buy_price}**", inline=True)
             play_embed.add_field(name="Confidence", value=f"**{play.confidence_rating}/10.0**", inline=True)
             play_embed.add_field(name="The Why", value=play.data_grounded_why, inline=False)
             play_embed.add_field(name="Devil's Advocate Protocol", value=f"*{play.devils_advocate_refutation}*", inline=False)
@@ -243,6 +253,7 @@ async def scan_and_process_slate(ctx=None, channel=None, target_date: str = None
 
 @bot.command(name="scan")
 async def manual_scan(ctx, target_date: str = None):
+    # Auto-correct MM-DD-YYYY to the strict YYYY-MM-DD standard for the API
     if target_date and len(target_date.split("-")[0]) == 2:
         try:
             parsed_date = datetime.strptime(target_date, "%m-%d-%Y")

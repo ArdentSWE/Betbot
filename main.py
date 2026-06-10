@@ -1,4 +1,5 @@
 import os
+import asyncio
 import httpx
 import discord
 from discord.ext import commands, tasks
@@ -132,10 +133,12 @@ analyst_agent = Agent(
 @analyst_agent.tool_plain
 def scour_the_web(query: str) -> str:
     """Use this tool to search the internet for starting pitchers, live ERAs, and injury reports."""
+    print(f"      [🌐 WEB SCOUR] AI Searching: '{query}'")
     try:
         results = DDGS().text(query, max_results=3)
         return str(results)
     except Exception as e:
+        print(f"      [❌ WEB SCOUR FAILED] {e}")
         return f"Web search failed: {e}"
 
 validator_agent = Agent(
@@ -184,13 +187,25 @@ async def scan_and_process_slate(ctx=None, channel=None, target_date: str = None
             color=ACE_COLOR
         ).set_footer(text=ACE_FOOTER))
         
+        print(f"\n=======================================================")
+        print(f"[🔬 X-RAY TARGET] {game['game_name']} ({game['league']})")
+        print(f"=======================================================")
+        
+        analysis_output = None 
+        
         try:
+            print("   [1/3] Structuring raw ESPN payload...")
             struct_output = await structurer_agent.run(str(game))
+            
+            print("   [2/3] Executing Omni-Factor Analyst (Triggering Web Tools)...")
             analysis_output = await analyst_agent.run(struct_output.data)
+            
+            print("   [3/3] Running strict Pydantic validation (8.5+ check)...")
             validated_payload = await validator_agent.run(analysis_output.data)
             
             play = validated_payload.data
             found_plays += 1
+            print(f"   [✅ PLAY CLEARED] Confidence: {play.confidence_rating}/10.0")
             
             play_embed = discord.Embed(
                 title=f"🎯 ACE EXCLUSIVE | {play.sport_league} ALPHA",
@@ -207,8 +222,18 @@ async def scan_and_process_slate(ctx=None, channel=None, target_date: str = None
             await out_channel.send(embed=play_embed)
             
         except Exception as e:
-            # Unhid the error: This will print the rejection reason directly to your Railway logs
-            print(f"[REJECTED] {game['game_name']} - Reason: {e}")
+            error_msg = str(e)
+            print(f"\n   [🛑 REJECTED BY TERMINAL]")
+            
+            if "8.5" in error_msg or "validation" in error_msg.lower():
+                print(f"   Reason: Failed the 8.5 Threshold or Strict Schema rules.")
+                if analysis_output:
+                    print(f"\n   [🧠 AI'S INTERNAL BREAKDOWN]:")
+                    print(f"   {'-'*50}")
+                    print(f"   {analysis_output.data[:1000]}...")
+                    print(f"   {'-'*50}\n")
+            else:
+                print(f"   Reason: System/Logic Failure -> {error_msg}")
             pass
 
     summary = discord.Embed(

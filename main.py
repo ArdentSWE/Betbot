@@ -1,5 +1,4 @@
 import os
-import asyncio
 import httpx
 import discord
 from discord.ext import commands, tasks
@@ -7,6 +6,7 @@ from datetime import datetime
 from dotenv import load_dotenv
 from pydantic import BaseModel, Field, field_validator
 from pydantic_ai import Agent
+from duckduckgo_search import DDGS
 
 # Load environment variables (.env file for local, Railway Variables for cloud)
 load_dotenv()
@@ -19,13 +19,11 @@ DISCORD_TOKEN = os.getenv("DISCORD_BOT_TOKEN")
 ACE_COLOR = 0xD4AF37 # Premium Gold hex code
 ACE_FOOTER = "ACE | Omni-Factor Quantitative Terminal"
 
-# Initialize Discord Bot with the command prefix '!ace '
 intents = discord.Intents.default()
 intents.message_content = True
 bot = commands.Bot(command_prefix="!ace ", intents=intents)
 
 # Pydantic-AI v2.0+ architecture. 
-# Explicitly routes to Chat Completions and auto-detects OPENAI_API_KEY from environment variables.
 MODEL = 'openai-chat:gpt-5.5'
 
 
@@ -57,10 +55,6 @@ class WebScrapingIngestionEngine:
         self.client = httpx.AsyncClient(headers={"User-Agent": "Mozilla/5.0"})
 
     async def fetch_live_slate(self, sport: str, league: str, target_date: str = None) -> list:
-        """
-        Scrapes ESPN public endpoints.
-        Accepts an optional target_date (e.g., '2026-06-15') for forward/backward scanning.
-        """
         base_url = f"https://site.api.espn.com/apis/site/v2/sports/{sport}/{league}/scoreboard"
         
         if target_date:
@@ -100,7 +94,6 @@ class WebScrapingIngestionEngine:
 # ==========================================
 # LAYERS 2 & 3: MULTI-AGENT PIPELINE (V2.0)
 # ==========================================
-
 structurer_agent = Agent(
     model=MODEL,
     system_prompt="Normalize the raw scraped sports JSON into a unified, crisp Markdown block mapping rosters, injuries, and stadium conditions.",
@@ -111,6 +104,7 @@ analyst_agent = Agent(
     model=MODEL,
     system_prompt=(
         "THE UNIVERSAL OMNI-FACTOR MASTER PROMPT (V2.0)\n\n"
+        "CRITICAL DIRECTIVE: You have access to a live web search tool. For EVERY matchup, you MUST use the search tool to find today's starting pitchers, their current ERAs, and any relevant injuries before analyzing the game.\n\n"
         "STAGE 1: MARKET SCRAPE & SITUATIONAL PHYSICS\n"
         "Context: Identify the exact date, location, real-time odds, implied probabilities, and public betting distribution.\n"
         "Environmental Physics: Quantify the stadium dimensions, weather, altitude, and travel fatigue.\n\n"
@@ -134,9 +128,19 @@ analyst_agent = Agent(
     model_settings={'temperature': 0.1}
 )
 
+# This tool physically gives the AI the ability to scour the web for missing data
+@analyst_agent.tool_plain
+def scour_the_web(query: str) -> str:
+    """Use this tool to search the internet for starting pitchers, live ERAs, and injury reports."""
+    try:
+        results = DDGS().text(query, max_results=3)
+        return str(results)
+    except Exception as e:
+        return f"Web search failed: {e}"
+
 validator_agent = Agent(
     model=MODEL,
-    output_type=AlphaPlay, # Fixed Pydantic-AI v2.0 parameter
+    output_type=AlphaPlay, 
     system_prompt="Cast the analytical breakdown into the JSON schema. Verify the confidence rating is strictly 8.5+. Strip narrative fluff.",
     model_settings={'temperature': 0.1}
 )
@@ -146,9 +150,7 @@ validator_agent = Agent(
 # DISCORD COMMAND & CONTINUOUS LOOP
 # ==========================================
 async def scan_and_process_slate(ctx=None, channel=None, target_date: str = None):
-    """The master continuous loop that processes games one by one."""
     out_channel = ctx.channel if ctx else channel
-    
     display_date = target_date if target_date else datetime.now().strftime('%Y-%m-%d')
     
     embed = discord.Embed(
@@ -190,7 +192,6 @@ async def scan_and_process_slate(ctx=None, channel=None, target_date: str = None
             play = validated_payload.data
             found_plays += 1
             
-            # Format high-quality play with ACE branding
             play_embed = discord.Embed(
                 title=f"🎯 ACE EXCLUSIVE | {play.sport_league} ALPHA",
                 color=ACE_COLOR
@@ -205,11 +206,11 @@ async def scan_and_process_slate(ctx=None, channel=None, target_date: str = None
             
             await out_channel.send(embed=play_embed)
             
-        except Exception:
-            # Game discarded (Failed 8.5 threshold or logic was broken in validation layer)
+        except Exception as e:
+            # Unhid the error: This will print the rejection reason directly to your Railway logs
+            print(f"[REJECTED] {game['game_name']} - Reason: {e}")
             pass
 
-    # Final wrap-up
     summary = discord.Embed(
         title="🏁 ACE TERMINAL SEQUENCE COMPLETE",
         description=f"Scan finished. Isolated **{found_plays}** alpha plays clearing the 8.5 threshold for {display_date}.",
@@ -221,17 +222,19 @@ async def scan_and_process_slate(ctx=None, channel=None, target_date: str = None
 
 @bot.command(name="scan")
 async def manual_scan(ctx, target_date: str = None):
-    """
-    Triggers the terminal interactively.
-    Usage 1: !ace scan (Scrapes today's slate)
-    Usage 2: !ace scan 2026-06-15 (Scrapes a specific future or past date)
-    """
+    # Auto-correct MM-DD-YYYY to the strict YYYY-MM-DD standard for the API
+    if target_date and len(target_date.split("-")[0]) == 2:
+        try:
+            parsed_date = datetime.strptime(target_date, "%m-%d-%Y")
+            target_date = parsed_date.strftime("%Y-%m-%d")
+        except ValueError:
+            pass 
+
     await scan_and_process_slate(ctx=ctx, target_date=target_date)
 
 
 @tasks.loop(hours=24)
 async def automated_daily_scan():
-    """Background loop that runs once every 24 hours."""
     channel_id_str = os.getenv("DISCORD_CHANNEL_ID")
     if not channel_id_str: 
         return

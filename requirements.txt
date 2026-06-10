@@ -4,3 +4,4 @@ httpx
 pandas
 discord.py
 python-dotenv
+duckduckgo-search

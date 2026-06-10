@@ -8,7 +8,6 @@ from dotenv import load_dotenv
 from pydantic import BaseModel, Field, field_validator
 from typing import List
 from pydantic_ai import Agent
-from pydantic_ai.models.openai import OpenAIModel
 
 load_dotenv()
 
@@ -16,7 +15,6 @@ load_dotenv()
 # BOT CONFIGURATION & ACE BRANDING
 # ==========================================
 DISCORD_TOKEN = os.getenv("DISCORD_BOT_TOKEN")
-OPENAI_KEY = os.getenv("OPENAI_API_KEY")
 
 ACE_COLOR = 0xD4AF37 # Premium Gold hex code
 ACE_FOOTER = "ACE | Omni-Factor Quantitative Terminal"
@@ -26,11 +24,8 @@ intents = discord.Intents.default()
 intents.message_content = True
 bot = commands.Bot(command_prefix="!ace ", intents=intents)
 
-# Initialize GPT-5.5 (or fallback to 4o depending on your OpenAI tier)
-if OPENAI_KEY:
-    MODEL = OpenAIModel('gpt-4o', api_key=OPENAI_KEY, config={'temperature': 0.1})
-else:
-    MODEL = 'openai:gpt-4o'
+# The Pydantic-AI framework automatically reads the OPENAI_API_KEY environment variable.
+MODEL = 'openai:gpt-4o'
 
 
 # ==========================================
@@ -93,9 +88,12 @@ class WebScrapingIngestionEngine:
 # ==========================================
 # LAYERS 2 & 3: MULTI-AGENT PIPELINE (V2.0)
 # ==========================================
+# model_settings={'temperature': 0.1} is applied to lock the reasoning deterministically
+
 structurer_agent = Agent(
     model=MODEL,
-    system_prompt="Normalize the raw scraped sports JSON into a unified, crisp Markdown block mapping rosters, injuries, and stadium conditions."
+    system_prompt="Normalize the raw scraped sports JSON into a unified, crisp Markdown block mapping rosters, injuries, and stadium conditions.",
+    model_settings={'temperature': 0.1}
 )
 
 analyst_agent = Agent(
@@ -121,13 +119,15 @@ analyst_agent = Agent(
         "Narrative Scrubbing: Completely eliminate gut feelings and unverified momentum narratives.\n\n"
         "STAGE 7: FINAL VERDICT & CONSERVATIVE EXECUTION\n"
         "Assign a conservative confidence rating on a scale of 1.0 to 10.0. Only plays hitting 8.5+ pass."
-    )
+    ),
+    model_settings={'temperature': 0.1}
 )
 
 validator_agent = Agent(
     model=MODEL,
     result_type=AlphaPlay,
-    system_prompt="Cast the analytical breakdown into the JSON schema. Verify the confidence rating is strictly 8.5+. Strip narrative fluff."
+    system_prompt="Cast the analytical breakdown into the JSON schema. Verify the confidence rating is strictly 8.5+. Strip narrative fluff.",
+    model_settings={'temperature': 0.1}
 )
 
 
@@ -228,7 +228,8 @@ async def on_ready():
     print(f"==========================================")
     print(f" ACE TERMINAL LOGGED IN AS: {bot.user.name}")
     print(f"==========================================")
-    automated_daily_scan.start()
+    if not automated_daily_scan.is_running():
+        automated_daily_scan.start()
 
 if __name__ == "__main__":
     if not DISCORD_TOKEN:

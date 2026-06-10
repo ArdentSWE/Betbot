@@ -7,9 +7,9 @@ from datetime import datetime
 from dotenv import load_dotenv
 from pydantic import BaseModel, Field, field_validator
 from pydantic_ai import Agent
-from duckduckgo_search import DDGS
+from ddgs import DDGS  # FIXED: Updated to the new package architecture
 
-# Load environment variables (.env file for local, Railway Variables for cloud)
+# Load environment variables
 load_dotenv()
 
 # ==========================================
@@ -194,14 +194,11 @@ async def scan_and_process_slate(ctx=None, channel=None, target_date: str = None
             struct_output = await structurer_agent.run(str(game))
             
             print("   [2/3] Executing Omni-Factor Analyst (Triggering Web Tools)...")
-            # FIXED: Updated .data to .output for Pydantic-AI v2.0
             analysis_output = await analyst_agent.run(struct_output.output) 
             
             print("   [3/3] Running strict Pydantic validation (8.5+ check)...")
-            # FIXED: Updated .data to .output
             validated_payload = await validator_agent.run(analysis_output.output) 
             
-            # FIXED: Updated .data to .output
             play = validated_payload.output 
             found_plays += 1
             print(f"   [✅ PLAY CLEARED] Confidence: {play.confidence_rating}/10.0")

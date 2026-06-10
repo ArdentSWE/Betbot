@@ -6,9 +6,9 @@ from discord.ext import commands, tasks
 from datetime import datetime
 from dotenv import load_dotenv
 from pydantic import BaseModel, Field, field_validator
-from typing import List
 from pydantic_ai import Agent
 
+# Load environment variables (.env file for local, Railway Variables for cloud)
 load_dotenv()
 
 # ==========================================
@@ -19,12 +19,13 @@ DISCORD_TOKEN = os.getenv("DISCORD_BOT_TOKEN")
 ACE_COLOR = 0xD4AF37 # Premium Gold hex code
 ACE_FOOTER = "ACE | Omni-Factor Quantitative Terminal"
 
+# Initialize Discord Bot with the command prefix '!ace '
 intents = discord.Intents.default()
 intents.message_content = True
 bot = commands.Bot(command_prefix="!ace ", intents=intents)
 
 # Pydantic-AI v2.0+ architecture. 
-# Explicitly routes to Chat Completions and auto-detects OPENAI_API_KEY from Railway variables.
+# Explicitly routes to Chat Completions and auto-detects OPENAI_API_KEY from environment variables.
 MODEL = 'openai-chat:gpt-5.5'
 
 
@@ -55,8 +56,19 @@ class WebScrapingIngestionEngine:
     def __init__(self):
         self.client = httpx.AsyncClient(headers={"User-Agent": "Mozilla/5.0"})
 
-    async def fetch_live_slate(self, sport: str, league: str) -> list:
-        url = f"https://site.api.espn.com/apis/site/v2/sports/{sport}/{league}/scoreboard"
+    async def fetch_live_slate(self, sport: str, league: str, target_date: str = None) -> list:
+        """
+        Scrapes ESPN public endpoints.
+        Accepts an optional target_date (e.g., '2026-06-15') for forward/backward scanning.
+        """
+        base_url = f"https://site.api.espn.com/apis/site/v2/sports/{sport}/{league}/scoreboard"
+        
+        if target_date:
+            clean_date = target_date.replace("-", "")
+            url = f"{base_url}?dates={clean_date}"
+        else:
+            url = base_url
+
         try:
             response = await self.client.get(url, timeout=15.0)
             if response.status_code != 200: return []
@@ -124,7 +136,7 @@ analyst_agent = Agent(
 
 validator_agent = Agent(
     model=MODEL,
-    output_type=AlphaPlay, # Fixed Pydantic-AI v2.0 Breaking Change
+    output_type=AlphaPlay, # Fixed Pydantic-AI v2.0 parameter
     system_prompt="Cast the analytical breakdown into the JSON schema. Verify the confidence rating is strictly 8.5+. Strip narrative fluff.",
     model_settings={'temperature': 0.1}
 )
@@ -133,13 +145,15 @@ validator_agent = Agent(
 # ==========================================
 # DISCORD COMMAND & CONTINUOUS LOOP
 # ==========================================
-async def scan_and_process_slate(ctx=None, channel=None):
+async def scan_and_process_slate(ctx=None, channel=None, target_date: str = None):
     """The master continuous loop that processes games one by one."""
     out_channel = ctx.channel if ctx else channel
     
+    display_date = target_date if target_date else datetime.now().strftime('%Y-%m-%d')
+    
     embed = discord.Embed(
         title="⚡ ACE TERMINAL PROTOCOL INITIATED",
-        description="Scraping live datasets for MLB, NBA, NHL, and UFC. Locking sequence engaged...",
+        description=f"Scraping datasets for **{display_date}**. Locking sequence engaged...",
         color=ACE_COLOR
     )
     embed.set_footer(text=ACE_FOOTER)
@@ -153,10 +167,10 @@ async def scan_and_process_slate(ctx=None, channel=None):
     
     all_games = []
     for sport, league in slates:
-        all_games.extend(await scraper.fetch_live_slate(sport, league))
+        all_games.extend(await scraper.fetch_live_slate(sport, league, target_date))
 
     if not all_games:
-        await out_channel.send("No active markets found in target endpoints.")
+        await out_channel.send(f"No active markets found for {display_date}.")
         return
 
     found_plays = 0
@@ -198,7 +212,7 @@ async def scan_and_process_slate(ctx=None, channel=None):
     # Final wrap-up
     summary = discord.Embed(
         title="🏁 ACE TERMINAL SEQUENCE COMPLETE",
-        description=f"Scan finished. Isolated **{found_plays}** alpha plays clearing the 8.5 threshold.",
+        description=f"Scan finished. Isolated **{found_plays}** alpha plays clearing the 8.5 threshold for {display_date}.",
         color=ACE_COLOR
     )
     summary.set_footer(text=ACE_FOOTER)
@@ -206,18 +220,30 @@ async def scan_and_process_slate(ctx=None, channel=None):
 
 
 @bot.command(name="scan")
-async def manual_scan(ctx):
-    await scan_and_process_slate(ctx=ctx)
+async def manual_scan(ctx, target_date: str = None):
+    """
+    Triggers the terminal interactively.
+    Usage 1: !ace scan (Scrapes today's slate)
+    Usage 2: !ace scan 2026-06-15 (Scrapes a specific future or past date)
+    """
+    await scan_and_process_slate(ctx=ctx, target_date=target_date)
 
 
 @tasks.loop(hours=24)
 async def automated_daily_scan():
-    channel_id = int(os.getenv("DISCORD_CHANNEL_ID", 0))
-    if channel_id == 0: return
+    """Background loop that runs once every 24 hours."""
+    channel_id_str = os.getenv("DISCORD_CHANNEL_ID")
+    if not channel_id_str: 
+        return
     
-    channel = bot.get_channel(channel_id)
-    if channel:
-        await scan_and_process_slate(channel=channel)
+    try:
+        channel_id = int(channel_id_str)
+        channel = bot.get_channel(channel_id)
+        if channel:
+            await scan_and_process_slate(channel=channel)
+    except ValueError:
+        print("Error: DISCORD_CHANNEL_ID must be a valid integer.")
+
 
 @bot.event
 async def on_ready():

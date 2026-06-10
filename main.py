@@ -19,13 +19,13 @@ DISCORD_TOKEN = os.getenv("DISCORD_BOT_TOKEN")
 ACE_COLOR = 0xD4AF37 # Premium Gold hex code
 ACE_FOOTER = "ACE | Omni-Factor Quantitative Terminal"
 
-# Initialize Bot with command prefix '!ace '
 intents = discord.Intents.default()
 intents.message_content = True
 bot = commands.Bot(command_prefix="!ace ", intents=intents)
 
-# The Pydantic-AI framework automatically reads the OPENAI_API_KEY environment variable.
-MODEL = 'openai:gpt-4o'
+# Pydantic-AI v2.0+ architecture. 
+# Explicitly routes to Chat Completions and auto-detects OPENAI_API_KEY from Railway variables.
+MODEL = 'openai-chat:gpt-5.5'
 
 
 # ==========================================
@@ -78,7 +78,7 @@ class WebScrapingIngestionEngine:
                     "venue": comp.get("venue", {}).get("fullName", "Unknown"),
                     "market_line": odds_record.get("details", "N/A"),
                     "total": odds_record.get("overUnder", 0.0),
-                    "raw_meta": str(event)[:1500] # Pass truncated meta for context
+                    "raw_meta": str(event)[:1500] 
                 })
             return extracted_games
         except Exception:
@@ -88,7 +88,6 @@ class WebScrapingIngestionEngine:
 # ==========================================
 # LAYERS 2 & 3: MULTI-AGENT PIPELINE (V2.0)
 # ==========================================
-# model_settings={'temperature': 0.1} is applied to lock the reasoning deterministically
 
 structurer_agent = Agent(
     model=MODEL,
@@ -125,7 +124,7 @@ analyst_agent = Agent(
 
 validator_agent = Agent(
     model=MODEL,
-    result_type=AlphaPlay,
+    output_type=AlphaPlay, # Fixed Pydantic-AI v2.0 Breaking Change
     system_prompt="Cast the analytical breakdown into the JSON schema. Verify the confidence rating is strictly 8.5+. Strip narrative fluff.",
     model_settings={'temperature': 0.1}
 )
@@ -162,7 +161,6 @@ async def scan_and_process_slate(ctx=None, channel=None):
 
     found_plays = 0
     
-    # "LOCK IN ON ONE GAME... THEN MOVE ONTO THE NEXT. CONTINUOUS LOOP."
     for game in all_games:
         await status_msg.edit(embed=discord.Embed(
             title="🔄 ACE TERMINAL SCANNING",
@@ -194,7 +192,7 @@ async def scan_and_process_slate(ctx=None, channel=None):
             await out_channel.send(embed=play_embed)
             
         except Exception:
-            # Game discarded (Failed 8.5 threshold or invalid logic)
+            # Game discarded (Failed 8.5 threshold or logic was broken in validation layer)
             pass
 
     # Final wrap-up
@@ -209,13 +207,11 @@ async def scan_and_process_slate(ctx=None, channel=None):
 
 @bot.command(name="scan")
 async def manual_scan(ctx):
-    """Interactive trigger: Type '!ace scan' in Discord to run the system immediately."""
     await scan_and_process_slate(ctx=ctx)
 
 
 @tasks.loop(hours=24)
 async def automated_daily_scan():
-    """Automated background execution loop."""
     channel_id = int(os.getenv("DISCORD_CHANNEL_ID", 0))
     if channel_id == 0: return
     
